@@ -1,0 +1,279 @@
+Natural Language Processing
+----------
+
+```{r eval=FALSE}
+download.file("https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip", "NLP.zip", method = "curl")
+unzip("NLP.zip")
+```
+
+```{r warning=FALSE}
+library(tm)
+library(SnowballC)
+library(ngram)
+library(ggplot2)
+library(gridExtra)
+library(stylo)
+path <- "~/final/en_US/"
+processed <- VCorpus(DirSource("~/final/en_US/"))
+```
+
+```{r, warning=F}
+
+processed <- tm_map(processed, tolower)
+processed <- tm_map(processed, removeWords, stopwords("english"))
+processed <- tm_map(processed, removePunctuation)
+processed <- tm_map(processed, removeNumbers)
+
+download.file("http://www.bannedwordlist.com/lists/swearWords.txt", "profanity.txt")
+profanity <- readLines("profanity.txt")
+processed <- tm_map(processed, removeWords, profanity)
+
+processed <- tm_map(processed , stripWhitespace)
+```
+
+
+```{r}
+clean <- unlist(sapply(processed, `[`))
+#write(clean, file = "clean.txt")
+clean <- readLines("clean.txt")
+
+set.seed(4055)
+clean <- sample(clean, 100000, replace = F)
+test <- clean[200001:300000]
+clean <- clean[1:200000]
+
+clean <- paste(clean, collapse = " ")
+clean <- strsplit(clean, split = " ")
+clean <- clean[[1]]
+out <- clean[grep("^[bcdefghjklmnopqrstuvwxyz]$", clean, perl = T)]
+clean <- clean[!clean %in% out]
+
+#a <- gsub("'", "", stopwords("english"))
+#a <- paste(a, collapse = " |")
+
+n1 <- make.ngrams(clean, ngram.size = 1)
+n1 <- data.frame(table(n1))
+n1 <- n1[order(n1$Freq, decreasing = T),]
+#n1 <- n1[n1$Freq != 1,]
+n1$n1 <- as.character(n1$n1)
+write.csv(n1, "n1.csv") 
+
+n2 <- make.ngrams(clean, ngram.size = 2)
+n2 <- data.frame(table(n2))
+n2 <- n2[order(n2$Freq, decreasing = T),]
+#n2 <- n2[n2$Freq != 1,]
+n2$n2 <- as.character(n2$n2)
+n2 <- n2[grep("^[a-z]+ [a-z]+", n2$n2, perl = T),]
+write.csv(n2, "n2.csv")
+
+n3 <- make.ngrams(clean, ngram.size = 3)
+n3 <- data.frame(table(n3))
+n3 <- n3[order(n3$Freq, decreasing = T),]
+tn3 <- n3[n3$Freq != 1,]
+n3$n3 <- as.character(n3$n3)
+n3 <- n3[grep("^[a-z]+ [a-z]+ [a-z]+", n3$n3, perl = T),]
+write.csv(tn3, "n3.csv")
+
+n4 <- make.ngrams(clean, ngram.size = 4)
+n4 <- data.frame(table(n4))
+n4 <- n4[order(n4$Freq, decreasing = T),]
+tn4 <- n4[n4$Freq != 1,]
+n4$n4 <- as.character(n4$n4)
+n4 <- n4[grep("^[a-z]+ [a-z]+ [a-z]+ [a-z]+", n4$n4, perl = T),]
+write.csv(tn4, "n4.csv")
+```
+
+```{r}
+n1 <- read.csv("n1.csv", stringsAsFactors = F); n1 <- n1[,2:3]
+n2 <- read.csv("n2.csv", stringsAsFactors = F); n2 <- n2[,2:3]
+n3 <- read.csv("n3.csv", stringsAsFactors = F); n3 <- n3[,2:3]
+n4 <- read.csv("n4.csv", stringsAsFactors = F); n4 <- n4[,2:3]
+
+
+predict <- function(x) {
+        x <- tolower(x) #convert to lower case
+        x <- gsub(' {2,}',' ',x) #sub out multiple spaces
+        x <- gsub("[[:punct:]]", "", x) #remove punctuation
+        x <- gsub(" $", "", x)
+        y <- strsplit(x, split = " ") #split into individual words for use later
+        y <- y[[1]]
+        ln <- length(y) #number of words
+        a <- NULL #initialise vector
+        if(ln == 1){ #only one input word
+                q <- n2[grep(paste0("^", x, " "), n2$n2),] #find possible words which come after input 
+                if(length(q$Freq) > 20) q <- q[1:20,] #top 20 only
+                if(length(q$Freq) == 0) stop("Your input phrase is too rare for a text prediction")
+                else w <- n1[n1$n1 == x,2] #frequency of one-gram which has been input
+                for(i in 1:length(q$Freq)){
+                    a[i] <- q$Freq[i]/w #calculate probability of each given input
+                    if(a[i] == 0) a[i] <- 0.0001 #assign a non-null probability to nulls
+                }
+                q$prob <- a #tack it onto the q vector
+                q <- q[order(q$prob, decreasing = T),] #order by probability
+        }else if(ln == 2){
+                test <- n3[grep(paste0("^", x, " "), n3$n3),] #match the two-gram to potential words
+                        if(length(test$Freq) == 0) { #if there are no matches
+                        x <- tail(y, 1) #reduce to a one-gram and follow the above procedure
+                        q <- n2[grep(paste0("^", x, " "), n2$n2),]
+                        if(length(q$Freq) > 20) q <- q[1:20,]
+                        if(length(q$Freq) == 0) {
+                        stop("Your input phrase is too rare for a text prediction")
+                        } else
+                        w <- n1[n1$n1 == x,2]
+                        for(i in 1:length(q$Freq)){
+                                a[i] <- q$Freq[i]/w
+                                if(a[i] == 0) a[i] <- 0.0001
+                        }
+                        q$prob <- a
+                        q <- q[order(q$prob, decreasing = T),]     
+                }else if(length(test$Freq) > 0){
+                        q <- test
+                        if(length(q$Freq) > 20) q <- q[1:20,]
+                        w <- n2[n2$n2 == x,2]
+                        for(i in 1:length(q$Freq)){
+                                a[i] <- q$Freq[i]/w #we can use the Markov chain property to estimate
+                                if(a[i] == 0) a[i] <- 0.0001
+                        }
+                        q$prob <- a
+                        q <- q[order(q$prob, decreasing = T),]
+                        
+                        
+                if(length(q$Freq) < 10) { #Not enough matches to be reliable
+                        suba <- NULL
+                        subx <- tail(y, 1)
+                        subq <- n2[grep(paste0("^", subx, " "), n2$n2),]
+                        if(length(subq$Freq) > 20) subq <- subq[1:20,]
+                        if(length(subq$Freq) > 0){
+                        subw <- n1[n1$n1 == subx,2]
+                        for(i in 1:length(subq$Freq)){
+                                suba[i] <- subq$Freq[i]/subw
+                               if(suba[i] == 0) suba[i] <- 0.0001
+                        }
+                        subq$prob <- suba
+                        subq <- subq[order(subq$prob, decreasing = T),]
+                        names(subq)[1] <- "n3"
+                        q <- rbind(q, subq)
+                        q <- q[order(q$prob, decreasing = T),]
+                        for(i in 2:length(q$Freq)){
+                        last1 <- tail(strsplit(q$n3[i], " ")[[1]], 1)
+                        minus1 <- tail(strsplit(q$n3[i-1], " ")[[1]], 1)
+                                if(identical(last1, minus1)) {
+                                        q$n3[i] <- NA
+                                }
+                        }
+                        q <- q[complete.cases(q),]
+                        }               
+                        }
+                        }
+        }else if(ln > 2){
+                x <- tail(y, 3) #only handling up to four-grams
+                x <- paste(x, collapse = " ")
+                test <- n4[grep(paste0("^", x, " "), n4$n4),]
+                if(length(test$Freq) == 0) { #if there are no matches
+                        x <- tail(y, 2) #reduce to a three-gram (two input words)
+                        x <- paste(x, collapse = " ")
+                        test <- n3[grep(paste0("^", x, " "), n3$n3),] #match the input to potential words
+                        if(length(test$Freq) == 0) { #if there are no matches
+                        x <- tail(y, 1) #reduce to a two-gram(1 input) and follow the above procedure
+                        q <- n2[grep(paste0("^", x, " "), n2$n2),]
+                        if(length(q$Freq) > 20) q <- q[1:20,]
+                if(length(q$Freq) == 0) {
+                        stop("Your input phrase is too rare for a text prediction")
+                } else
+                        w <- n1[n1$n1 == x,2]
+                        for(i in 1:length(q$Freq)){
+                                a[i] <- q$Freq[i]/w
+                                if(a[i] == 0) a[i] <- 0.0001
+                        }
+                        q$prob <- a
+                        q <- q[order(q$prob, decreasing = T),]     
+                }else if(length(test$Freq) > 0) {
+                        q <- test
+                        if(length(q$Freq) > 20) q <- q[1:20,]
+                        w <- n2[n2$n2 == x,2]
+                        for(i in 1:length(q$Freq)){
+                                a[i] <- q$Freq[i]/w #Again utilising Markov principle
+                                if(a[i] == 0) a[i] <- 0.0001
+                        }
+                        q$prob <- a
+                        q <- q[order(q$prob, decreasing = T),]
+                        
+                        
+                if(length(q$Freq) < 10) { #Not enough matches to be reliable
+                        suba <- NULL
+                        subx <- tail(y, 1)
+                        subq <- n2[grep(paste0("^", subx, " "), n2$n2),]
+                        if(length(subq$Freq) > 20) subq <- subq[1:20,]
+                        if(length(subq$Freq) > 0){
+                        subw <- n1[n1$n1 == subx,2]
+                        for(i in 1:length(subq$Freq)){
+                                suba[i] <- subq$Freq[i]/subw
+                               if(suba[i] == 0) suba[i] <- 0.0001
+                        }
+                        subq$prob <- suba
+                        subq <- subq[order(subq$prob, decreasing = T),]
+                        names(subq)[1] <- "n3"
+                        q <- rbind(q, subq)
+                        q <- q[order(q$prob, decreasing = T),]
+                        for(i in 2:length(q$Freq)){
+                        last1 <- tail(strsplit(q$n3[i], " ")[[1]], 1)
+                        minus1 <- tail(strsplit(q$n3[i-1], " ")[[1]], 1)
+                                if(identical(last1, minus1)) {
+                                        q$n3[i] <- NA
+                                }
+                        }
+                        q <- q[complete.cases(q),]
+                        }
+                        }
+                }
+                        } else if(length(test$Freq) > 0){
+                                q <- test
+                        if(length(q$Freq) > 20) q <- q[1:20,]
+                        w <- n3[n3$n3 == x,2]
+                        for(i in 1:length(q$Freq)){
+                                a[i] <- q$Freq[i]/w
+                                if(a[i] == 0) a[i] <- 0.0001
+                        }
+                        q$prob <- a
+                        q <- q[order(q$prob, decreasing = T),]
+                                
+                                if(length(q$Freq) < 10) { #Got some 4-grams but not enough
+                                suba <- NULL
+                                subx <- tail(y, 2) #squash to 2 input words
+                                subx <- paste(subx, collapse = " ")
+                                subq <- n3[grep(paste0("^", subx, " "), n3$n3),]
+                                if(length(subq$Freq) > 20) subq <- subq[1:20,]
+                                subw <- n2[n2$n2 == subx,2]
+                                for(i in 1:length(subq$Freq)){
+                                suba[i] <- subq$Freq[i]/subw
+                                if(suba[i] == 0) suba[i] <- 0.0001
+                        }
+                        subq$prob <- suba
+                        subq <- subq[order(subq$prob, decreasing = T),]
+                        names(subq)[1] <- "n4"
+                        q <- rbind(q, subq)
+                        q <- q[order(q$prob, decreasing = T),]
+                        for(i in 2:length(q$Freq)){
+                        last1 <- tail(strsplit(q$n4[i], " ")[[1]], 1)
+                        minus1 <- tail(strsplit(q$n4[i-1], " ")[[1]], 1)
+                                if(identical(last1, minus1)) {
+                                        q$n4[i] <- NA
+                                }
+                        }
+                        q <- q[complete.cases(q),]
+                        }
+                        }
+                }
+        probs <- q[1:10,3]
+        q <- q[1,1]
+        for(i in 1:length(q))
+                q[i] <- tail(strsplit(q[i],split=" ")[[1]],1)
+        return(q)
+        }
+```
+
+
+```{r}
+library(caret)
+
+modelfit <- train(XXXX ~ ., method = "nb", data = train)
