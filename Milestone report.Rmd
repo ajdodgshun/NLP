@@ -1,0 +1,217 @@
+Natural Language Processing
+----------
+
+##Summary
+Natural Language Processing concerns the interaction between humans and computers.  The overall goal is to produce a predictive function where a program can predict the most likely next word in a sentence based on what has already been typed.  To do this a large volume of text from multiple sources must be broken down and analysed. A concise version of the steps involved is below.  The entire code with explanations is listed in Appendix A but is not required for the basic understanding.  Figures are available in Appendix B.
+
+##Steps
+
+1. A data set from news, blogs and twitter sources has been loaded in.  This reveals extremely large data.  Length, character counts and word counts are found in Appendix B 
+2. For computational convenience this has been subsetted to a reasonable level and broken into a training and test set for the predictive algorithm.
+3. Data has then been processed to remove numbers, punctuation, profanity and white space.
+4. We now need to tokenize the data.  This involves splitting into 1, 2 and 3 word "tokens".  We can then sort these by word frequency to discover the most commonly occurring words and word sets or "n-grams".
+5. Plotting the top 1, 2 and 3 word phrases from each source reveals interesting findings.
+6. Merging the datasets can show overall frequency findings.
+
+##Findings
+
+1. The data sets are extremely large, hundreds of megabytes each with millions of words.
+2. Twitter has, as expected, shorter lines by word and character count
+3. For "one-grams", there are some commonalities across sources - "the" and "and" are common words - but some differences - "you" and "for" feature more in twitter than other sources.
+4. For "two-grams", "in the", "to the" and "of the" are very common across sources.
+5. For "three-grams", "a lot of" and "one of the" are very common across sources as is "the united states" which references where the data was sourced from.
+6. Overall the similarities were greater than the differences for two and three-grams meaning we are justified in merging the datasets.
+7. As the length of the n-grams goes up, the number required to capture certain proportions of frequency increases massively.  50% of one-gram frequency is encapsulated by only 200 words whereas 180,000 three-grams are required to capture 50% of the frequency of three-grams.
+
+##Future Development
+
+1. Accuracy depends heavily on volume of input.  As sample size increases so does computational workload.
+2. Accuracy may also rely on n-grams of longer length.  This also will increase workload.
+3. The presumption will be that longer n-grams will be more accurate at predicting words but less efficient - the reason for this is that there are far more unique five-grams than there are unique words in a language.  This will take some balancing to achieve an efficient app with enough accuracy to be useful.
+4. Once this balance has been achieved predictions can be modelled and tested for accuracy and efficiency before coding this as a Shiny app. 
+
+
+##Appendix A - complete code with more detailed explanation
+
+###Step 1
+First we must download the file and unzip it
+```{r eval=FALSE}
+download.file("https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip", "NLP.zip", method = "curl")
+unzip("NLP.zip")
+```
+
+Secondly we must read in the English language files which consist of news, blogs and twitter.  A basic linecount, mean character count and mean word count are calculated.
+```{r warning=FALSE}
+library(tm)
+library(SnowballC)
+library(ngram)
+library(textcat)
+library(RWeka)
+library(ggplot2)
+library(gridExtra)
+news <- readLines("~/final/en_US/en_US.news.txt")
+blogs <- readLines("~/final/en_US/en_US.blogs.txt")
+twitter <- readLines("~/final/en_US/en_US.twitter.txt")
+length <- c(length(news), length(blogs), length(twitter))
+chars <- c(mean(nchar(news)), mean(nchar(blogs)), mean(nchar(twitter)))
+words <- c(mean(sapply(gregexpr(" ", news), length)+1), mean(sapply(gregexpr(" ", blogs), length)+1), mean(sapply(gregexpr(" ", twitter), length)+1))
+size <- c(object.size(news), object.size(blogs), object.size(twitter))
+table1 <- cbind(length, chars, words, size)
+colnames(table1) <- c("Length", "Mean Character Count", "Mean Word Count", "File size")
+rownames(table1) <- c("News", "Blogs", "Twitter")
+```
+
+###Step 2
+The data sets are simply too big to work with and process.  We must subset to a reasonable level.  After setting the seed to ensure reproducibility we draw a random sample without replacement from each of the language sets for training and testing.  This may duplicate some lines of text but the overall effect will likely be small.  We then convert to a corpus for processing.
+```{r}
+set.seed(1428)
+newstrain <- sample(news, 50000)
+blogstrain <- sample(blogs, 50000)
+twittertrain <- sample(twitter, 50000)
+
+set.seed(18822)
+newstest <- sample(news, 20000)
+blogstest <- sample(blogs, 20000)
+twittertest <- sample(twitter, 20000)
+
+train <- VCorpus(VectorSource(c(newstrain, blogstrain, twittertrain)))
+test <- VCorpus(VectorSource(c(newstest, blogstest, twittertest)))
+```
+
+###Step 3
+Processing consists of making all words lower case, removing punctuation and numbers and filtering profanity.  Then excess white space is removed.
+```{r, warning=F}
+
+processed <- tm_map(train, tolower)
+processed <- tm_map(processed, removePunctuation)
+processed <- tm_map(processed, removeNumbers)
+
+download.file("http://www.bannedwordlist.com/lists/swearWords.txt", "profanity.txt")
+profanity <- readLines("profanity.txt")
+processed <- tm_map(processed, removeWords, profanity)
+
+processed <- tm_map(processed , stripWhitespace)
+```
+
+###Step 4
+We can now make document term matrices from each source, remove the sparse terms and sort them in order of frequency.  First we collapse the lines of text into one large character.  There is no reason we will need to determine anything in our analysis by its line of origin so it is easier to work with one large character for each set.  Stop words have deliberately not been removed as it is important to predict when these occur and put them in the predictive algorithm.  It is no use to be trying to write a sentence and not have the function predict stopwords.
+
+```{r}
+newstrain <- paste(newstrain, collapse = " ")
+blogstrain <- paste(blogstrain, collapse = " ")
+twittertrain <- paste(twittertrain, collapse = " ")
+
+dtmnews <- DocumentTermMatrix(VCorpus(VectorSource(newstrain)))
+dtmblogs <- DocumentTermMatrix(VCorpus(VectorSource(blogstrain)))
+dtmtwitter <- DocumentTermMatrix(VCorpus(VectorSource(twittertrain)))
+                                   
+dtmnews <- removeSparseTerms(dtmnews, 0.99)
+dtmblogs <- removeSparseTerms(dtmblogs, 0.99)
+dtmtwitter <- removeSparseTerms(dtmtwitter, 0.99)
+
+dtmnews <- as.matrix(dtmnews)
+dtmnews <- sort(colSums(dtmnews), decreasing = T)
+dtmblogs <- as.matrix(dtmblogs)
+dtmblogs <- sort(colSums(dtmblogs), decreasing = T)
+dtmtwitter <- as.matrix(dtmtwitter)
+dtmtwitter <- sort(colSums(dtmtwitter), decreasing = T)
+```
+As well as the simple one-grams from the document term matrix, we would like 2 and 3 grams also which we can get from the NGram Tokenizer in RWeka.
+After some serious data wrangling and plotting code we can see what the most common 1-, 2- and 3-grams for news, blogs and twitter are.
+```{r}
+rm(list=setdiff(ls(), c("table1", "train", "test", "processed", "dtmnews", "dtmblogs", "dtmtwitter")))
+clean <- unlist(sapply(processed, `[`))
+n2newstokens <- NGramTokenizer(clean[1:5000], Weka_control(min = 2, max = 2))
+n2news <- data.frame(table(n2newstokens))
+n2blogstokens <- NGramTokenizer(clean[5001:10000], Weka_control(min = 2, max = 2))
+n2blogs <- data.frame(table(n2blogstokens))
+n2twittertokens <- NGramTokenizer(clean[10001:15000], Weka_control(min = 2, max = 2))
+n2twitter <- data.frame(table(n2twittertokens))
+
+n3newstokens <- NGramTokenizer(clean[1:5000], Weka_control(min = 3, max = 3))
+n3news <- data.frame(table(n3newstokens))
+n3blogstokens <- NGramTokenizer(clean[5001:10000], Weka_control(min = 3, max = 3))
+n3blogs <- data.frame(table(n3blogstokens))
+n3twittertokens <- NGramTokenizer(clean[10001:15000], Weka_control(min = 3, max = 3))
+n3twitter <- data.frame(table(n3twittertokens))
+```
+
+###Step 5
+Plotting top 20 terms from news, blogs and twitter.
+```{r}
+top20news1 <- data.frame(names(dtmnews[1:20]),dtmnews[1:20])
+colnames(top20news1) <- c("Word", "Frequency")
+top20news2 <- n2news[order(n2news$Freq, decreasing = T),]
+top20news2 <- top20news2[1:20,]
+colnames(top20news2) <- c("Word", "Frequency")
+top20news3 <- n3news[order(n3news$Freq, decreasing = T),]
+top20news3 <- top20news3[1:20,]
+colnames(top20news3) <- c("Word", "Frequency")
+
+top20blogs1 <- data.frame(names(dtmblogs[1:20]), dtmblogs[1:20])
+colnames(top20blogs1) <- c("Word", "Frequency")
+top20blogs2 <- n2blogs[order(n2blogs$Freq, decreasing = T),]
+top20blogs2 <- top20blogs2[1:20,]
+colnames(top20blogs2) <- c("Word", "Frequency")
+top20blogs3 <- n3blogs[order(n3blogs$Freq, decreasing = T),]
+top20blogs3 <- top20blogs3[1:20,]
+colnames(top20blogs3) <- c("Word", "Frequency")
+
+top20twitter1 <- data.frame(names(dtmtwitter[1:20]), dtmtwitter[1:20])
+colnames(top20twitter1) <- c("Word", "Frequency")
+top20twitter2 <- n2twitter[order(n2twitter$Freq, decreasing = T),]
+top20twitter2 <- top20twitter2[1:20,]
+colnames(top20twitter2) <- c("Word", "Frequency")
+top20twitter3 <- n3twitter[order(n3twitter$Freq, decreasing = T),]
+top20twitter3 <- top20twitter3[1:20,]
+colnames(top20twitter3) <- c("Word", "Frequency")
+
+a <- ggplot(top20news1, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + ggtitle("News")
+b <- ggplot(top20blogs1, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + ggtitle("Blogs")
+c <- ggplot(top20twitter1, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + ggtitle("Twitter")
+
+d <- ggplot(top20news2, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + ggtitle("News")
+e <- ggplot(top20blogs2, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + ggtitle("Blogs")
+f <- ggplot(top20twitter2, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + ggtitle("Twitter")
+
+g <- ggplot(top20news3, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=45,hjust=1,vjust=0.5)) + ggtitle("News")
+h <- ggplot(top20blogs3, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=45,hjust=1,vjust=0.5)) + ggtitle("Blogs")
+i <- ggplot(top20twitter3, aes(Word, Frequency)) + geom_bar(stat = "Identity") + theme(axis.text.x=element_text(angle=45,hjust=1,vjust=0.5)) + ggtitle("Twitter")
+```
+
+###Step 6
+We can use the whole datasets and have another look at the variability.  To generate an appropriate prediction we must look much further than the top 20.
+```{r}
+n1 <- NGramTokenizer(clean, Weka_control(min = 1, max = 1))
+n2 <- c(n2newstokens, n2blogstokens, n2twittertokens)
+n3 <- c(n3newstokens, n3blogstokens, n3twittertokens)
+
+n1 <- data.frame(table(n1))
+n2 <- data.frame(table(n2))
+n3 <- data.frame(table(n3))
+
+n1 <- n1[order(n1$Freq, decreasing = T),]
+n2 <- n2[order(n2$Freq, decreasing = T),]
+n3 <- n3[order(n3$Freq, decreasing = T),]
+```
+
+##Appendix B - Figures and Tables
+```{r fig.height=8, echo=FALSE}
+table1
+grid.arrange(a, b, c, nrow=3, ncol=1)
+grid.arrange(d, e, f, nrow=3, ncol=1)
+grid.arrange(g, h, i, nrow=3, ncol=1)
+```
+
+Frequency of one-, two- and three-grams
+```{r}
+sum(n1$Freq[1:200])/sum(n1$Freq)
+sum(n1$Freq[1:8000])/sum(n1$Freq)
+
+sum(n2$Freq[1:35000])/sum(n2$Freq)
+sum(n2$Freq[1:210000])/sum(n2$Freq)
+
+sum(n3$Freq[1:180000])/sum(n3$Freq)
+sum(n3$Freq[1:370000])/sum(n3$Freq)
+```
+
